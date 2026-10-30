@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Dalamud.Plugin.Services;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
@@ -36,11 +37,13 @@ public static unsafe class ReplayManager
     private static readonly MemoryPatch InstantFadeInPatch =
         new("44 8D 42 0A 41 FF 92 ?? ?? 00 00 48 8B 5C 24", [null, null, null, 0x01]);
 
-    public static readonly MemoryPatch ReplaceLocalPlayerNamePatch =
-        new("75 ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? F6 05", [0x90, 0x90]);
-
     private static readonly MemoryPatch RemoveProcessingLimitPatch =
         new("41 FF C7 48 39 43", [0x90, 0x90, 0x90]);
+
+    private static MemoryPatch? TargetActionTableSafetyPatch;
+
+    public static readonly MemoryPatch ReplaceLocalPlayerNamePatch =
+        new("75 ?? 48 8D 4C 24 ?? E8 ?? ?? ?? ?? F6 05", [0x90, 0x90]);
 
     private static readonly MemoryPatch RemoveProcessingLimitPatch2 =
         new("0F 87 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 33 F6", [0x90, 0x90, 0x90, 0x90, 0x90, 0x90]);
@@ -176,6 +179,33 @@ public static unsafe class ReplayManager
         );
 
         RemoveProcessingLimitPatch.Enable();
+
+        try
+        {
+            if (Service.SigScanner.TryScanModule("4B 8D 0C 0A 48 3B F1 75 ?? 41 80 FE 07 0F 84", out var addr))
+            {
+                var originalRel = *(int*)(addr + 15);
+                var newRel = originalRel + 6;
+                var newBytes = new byte[12];
+                newBytes[0] = 0x0F;
+                newBytes[1] = 0x84;
+                fixed (byte* p = &newBytes[2])
+                    *(int*)p = newRel;
+                for (var i = 6; i < 12; i++)
+                    newBytes[i] = 0x90;
+
+                TargetActionTableSafetyPatch = new MemoryPatch(addr + 7, newBytes.Select(b => (byte?)b).ToArray(), true);
+            }
+            else
+            {
+                Service.Log.Warning("未能定位 TargetActionTableSafety 签名，跳过安全补丁安装");
+            }
+        }
+        catch (Exception ex)
+        {
+            Service.Log.Error(ex, "初始化 TargetActionTableSafety 补丁失败");
+        }
+
         CreateGetReplaySegmentHookPatch.Enable();
         RemoveRecordReadyToastPatch.Enable();
         AlwaysRecordPatch.Enable();
@@ -235,6 +265,8 @@ public static unsafe class ReplayManager
     public static void Uninit()
     {
         RemoveProcessingLimitPatch.Disable();
+        TargetActionTableSafetyPatch?.Dispose();
+        TargetActionTableSafetyPatch = null;
         RemoveProcessingLimitPatch2.Disable();
         ForceFastForwardPatch.Disable();
         RemoveRecordReadyToastPatch.Disable();

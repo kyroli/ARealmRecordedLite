@@ -17,8 +17,8 @@ public class Configuration : IPluginConfiguration
     public bool   EnableQuickLoad = true;
     public bool   EnableJumpToTime;
     public float  MaxSeekDelta      = 100;
-    public float  CustomSpeedPreset = 30;
-    public bool   EnableWaymarks    = true;
+    public float  CustomSpeedPreset  = 30;
+    public bool   EnableWaymarks     = true;
 
     public void Init() { }
 
